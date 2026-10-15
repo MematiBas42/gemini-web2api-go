@@ -24,10 +24,13 @@ import (
 
 // QuotaWindow 是一个配额窗口的探测结果。
 type QuotaWindow struct {
-	WindowID  int     `json:"window_id"`
-	Remaining float64 `json:"remaining"` // 0~1，剩余比例
-	Tier      int     `json:"tier"`
-	ResetAt   int64   `json:"reset_at"` // epoch 秒
+	WindowID    int     `json:"window_id"`
+	Remaining   float64 `json:"remaining"` // 0~1 (Google's raw used ratio in Euraxluo schema)
+	UsedPercent int     `json:"used_percent"`
+	RemainPct   int     `json:"remain_percent"`
+	Tier        int     `json:"tier"`        // 1 = 5-Hour rolling window, 2 = Weekly
+	PeriodName  string  `json:"period_name"` // "5-Hour" / "Weekly"
+	ResetAt     int64   `json:"reset_at"`    // epoch 秒
 }
 
 // parseQuotaPayload 从 batchexecute 的原始响应里解析配额窗口。
@@ -87,7 +90,23 @@ func quotaFromLines(rpcs [][]json.RawMessage) ([]QuotaWindow, error) {
 				json.Unmarshal(w[2], &tier) != nil {
 				continue
 			}
-			qw := QuotaWindow{WindowID: id, Remaining: frac, Tier: tier}
+			usedPct := int(math.Round(frac * 100))
+			remPct := 100 - usedPct
+			if remPct < 0 {
+				remPct = 0
+			}
+			periodName := "Weekly"
+			if tier == 1 {
+				periodName = "5-Hour"
+			}
+			qw := QuotaWindow{
+				WindowID:    id,
+				Remaining:   frac,
+				UsedPercent: usedPct,
+				RemainPct:   remPct,
+				Tier:        tier,
+				PeriodName:  periodName,
+			}
 			// 重置时间: [[[sec, nanos]]]（可有可无）
 			if len(w) > 3 {
 				var resets [][]float64
@@ -146,7 +165,15 @@ func describeQuota(wins []QuotaWindow) string {
 				reset = t.Format("01-02 15:04")
 			}
 		}
-		parts = append(parts, fmt.Sprintf("档%d 剩%.0f%%（%s 重置）", w.Tier, w.Remaining*100, reset))
+		label := w.PeriodName
+		if label == "" {
+			if w.Tier == 1 {
+				label = "5-Hour"
+			} else {
+				label = "Weekly"
+			}
+		}
+		parts = append(parts, fmt.Sprintf("档%d(%s) 已用%d%%/剩%d%%（%s 重置）", w.Tier, label, w.UsedPercent, w.RemainPct, reset))
 	}
 	return strings.Join(parts, "；")
 }

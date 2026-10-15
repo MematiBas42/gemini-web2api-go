@@ -1324,10 +1324,14 @@ async function editCookieAcct(id, label, note) {
   await refreshPage();
 }
 
-function quotaBadge(remaining, resetText, tier) {
-  const cls = remaining < 0.10 ? 'fail' : remaining < 0.30 ? 'warn' : 'ok';
-  const tag = tier === 2 ? t('高级') : tier === 1 ? t('基础') : t('档') + tier;
-  return `<span class="badge ${cls}" title="${tag}${t('档剩余')} ${(remaining * 100).toFixed(1)}%">${tag} ${Math.round(remaining * 100)}%</span>` +
+function quotaBadge(w, resetText) {
+  const used = w.used_percent !== undefined ? w.used_percent : Math.round((w.remaining ?? 0) * 100);
+  const remain = w.remain_percent !== undefined ? w.remain_percent : Math.max(0, 100 - used);
+  const rawTag = w.period_name || (w.tier === 1 ? '5-Hour' : w.tier === 2 ? 'Weekly' : ('Tier ' + w.tier));
+  const tag = t(rawTag);
+  const cls = used >= 95 ? 'fail' : used >= 75 ? 'warn' : 'ok';
+  const title = `${tag}: ${used}% ${t('used')}, ${remain}% ${t('remaining')} (${t('Resets at')} ${resetText})`;
+  return `<span class="badge ${cls}" title="${escapeHtml(title)}">${escapeHtml(tag)} ${used}% ${t('used')}</span>` +
          `<span style="font-size:11px;color:var(--muted)"> ${resetText}</span>`;
 }
 
@@ -1344,11 +1348,12 @@ async function loadQuotaCol() {
         cell.innerHTML = '<span class="badge muted" title="' + escapeHtml(d.detail || t('探测失败')) + '">—</span>';
         return;
       }
-      cell.innerHTML = (d.quota || []).map(w => {
+      const sorted = (d.quota || []).slice().sort((x, y) => (x.tier || 0) - (y.tier || 0));
+      cell.innerHTML = sorted.map(w => {
         const tObj = new Date(w.reset_at * 1000);
         const today = new Date().toDateString() === tObj.toDateString();
         const reset = today ? tObj.toTimeString().slice(0, 5) : (tObj.getMonth() + 1 + '-' + tObj.getDate());
-        return quotaBadge(w.remaining, reset, w.tier);
+        return quotaBadge(w, reset);
       }).join('<br>');
     } catch (e) {
       cell.innerHTML = '<span class="badge muted" title="' + escapeHtml(String(e)) + '">—</span>';
@@ -1835,6 +1840,15 @@ async function doLogin() {
 // 只在最外面套一层翻译。插值文案（带数字/名字的）不精确匹配、保持中文，属可接受。
 const I18N_EN = {
   '配额': 'Quota',
+  '5-Hour': '5-Hour',
+  'Weekly': 'Weekly',
+  'used': 'used',
+  'remaining': 'remaining',
+  'Resets at': 'Resets at',
+  '5小时': '5-Hour',
+  '每周': 'Weekly',
+  '已用': 'used',
+  '剩余': 'remaining',
   '高级': 'Premium',
   '基础': 'Basic',
   '档': 'Tier ',
