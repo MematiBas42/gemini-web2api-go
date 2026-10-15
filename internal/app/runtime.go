@@ -72,6 +72,9 @@ type RuntimeConfig struct {
 	// 漂到别的出口。没绑定过的号分新出口时优先挑没被别的 enabled 账号占的（一号一出口），
 	// 两种策略下都一样。见 acquireExitForAccount。
 	AccountFirst bool `json:"account_first"`
+	// 严格模型校验（#41）：服务端自报的模型和请求的不一致时回 429 而不是把降级后的
+	// 正文当成功发出去（额度耗尽时上游会静默降级）。默认 false。
+	StrictModel bool `json:"strict_model"`
 }
 
 const runtimeConfigKey = "runtime_config"
@@ -108,6 +111,7 @@ func initRuntimeConfig() {
 		AnonFirst:              cfg.AnonFirst,
 		TemporaryChat:          cfg.TemporaryChat,
 		AccountFirst:           cfg.AccountFirst,
+		StrictModel:            cfg.StrictModel,
 	}
 	if raw := kvGet(runtimeConfigKey); raw != "" {
 		saved := base

@@ -244,11 +244,17 @@ type StreamResult struct {
 // RateLimitError 表示所有 IP slot 都达到了限流上限。
 // HTTP handler 看到这个错时返回 429 给客户端。
 type RateLimitError struct {
-	Reason  string // "concurrent" / "rpm" / "rph"
+	Reason  string // "concurrent" / "rpm" / "rph" / "model_downgraded" / "quota_blocked"
 	ProxyID int64  // 0 = 直连 slot 满
 }
 
 func (e *RateLimitError) Error() string {
+	if e.Reason == "model_downgraded" {
+		return "model downgraded upstream (quota exhausted); strict_model halted response"
+	}
+	if e.Reason == "quota_blocked" {
+		return "all account premium quotas are temporarily exhausted; rolling window cool-down"
+	}
 	if e.ProxyID == 0 {
 		return "direct IP slot full: " + e.Reason + " limit reached (configure proxies to scale)"
 	}
@@ -486,9 +492,7 @@ func streamGenerateWithFiles(prompt, latest string, mc ModelConfig, pending []pe
 	// 所有账号的高级配额都在受限期（配额感知路由）：明确报错而不是匿名服务——
 	// 匿名发登录态模型必然被静默降级，客户端拿到的是「看起来成功」的劣化回答。
 	if !slotHeld && sawAccount == false && quotaSkipped > 0 {
-		return attrib(fmt.Errorf(
-			"全部 %d 个账号的高级配额都在受限期（滚动窗口，最迟 %v 后自动恢复）；"+
-				"本次请求已取消，避免拿到静默降级的 Flash-Lite 回答", quotaSkipped, quotaBlockDur))
+		return attrib(&RateLimitError{Reason: "quota_blocked", ProxyID: -1})
 	}
 
 	// 所有 enabled 账号绑定的出口都在限流线上（account_first）：要么按 fallback_direct
@@ -803,6 +807,11 @@ func streamGenerateWithFiles(prompt, latest string, mc ModelConfig, pending []pe
 				logf("[quota] 账号 #%d 被静默降级（上游自报 %s），换号重试",
 					cookieID, result.UpstreamModel)
 				return streamGenerateWithFiles(prompt, latest, mc, pending, onDelta, onReasoning)
+			}
+			if rtCfg().StrictModel {
+				logf("[quota] 账号 #%d 被静默降级（上游自报 %s），strict_model 已开，终止并返回 429",
+					cookieID, result.UpstreamModel)
+				return attrib(&RateLimitError{Reason: "model_downgraded", ProxyID: -1})
 			}
 			logf("[quota] 账号 #%d 被静默降级（上游自报 %s），无可换的号或已吐字，按降级结果返回",
 				cookieID, result.UpstreamModel)

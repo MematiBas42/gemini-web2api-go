@@ -14,6 +14,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -359,4 +360,61 @@ func mergeSkip(a, b map[int64]bool) map[int64]bool {
 func enabledAccountCount() int {
 	_, n := accountCount()
 	return n
+}
+
+// handleAdminQuota supports GET /admin/api/quota?account_id=N
+func handleAdminQuota(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var target *CookieAccount
+	if idStr := r.URL.Query().Get("account_id"); idStr != "" {
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err == nil {
+			for _, a := range accountList() {
+				if a.ID == id {
+					target = &a
+					break
+				}
+			}
+		}
+	}
+	if target == nil {
+		for _, a := range accountList() {
+			if a.Status == "active" {
+				target = &a
+				break
+			}
+		}
+	}
+	if target == nil {
+		writeJSON(w, 404, map[string]interface{}{"ok": false, "error": "no accounts available"})
+		return
+	}
+	wins, proxyName, detail := probeAccountQuota(*target)
+	snap := map[string]interface{}{
+		"ok":         len(wins) > 0,
+		"account_id": target.ID,
+		"account":    target.Label,
+		"proxy":      proxyName,
+		"direct":     proxyName == "直连" || proxyName == "Direct" || proxyName == "",
+		"detail":     detail,
+		"fetched_at": time.Now().Unix(),
+	}
+	for _, w := range wins {
+		// Tier 1 = 5-hour rolling limit, Tier 2 = weekly limit
+		metric := map[string]interface{}{
+			"used_percent":   int(math.Round(w.Remaining * 100)),
+			"remain_percent": int(math.Round((1.0 - w.Remaining) * 100)),
+			"reset_at":       w.ResetAt,
+			"reset_in_sec":   w.ResetAt - time.Now().Unix(),
+		}
+		if w.Tier == 1 {
+			snap["five_hour"] = metric
+		} else if w.Tier == 2 {
+			snap["weekly"] = metric
+		}
+	}
+	writeJSON(w, 200, snap)
 }

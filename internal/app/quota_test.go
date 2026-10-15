@@ -31,7 +31,8 @@ func TestParseQuotaPayload(t *testing.T) {
 	if basic.WindowID != 1895 || basic.Remaining < 0.209 || basic.Remaining > 0.211 {
 		t.Errorf("基础档解析错误: %+v", basic)
 	}
-	if got := time.Unix(basic.ResetAt, 0).Local().Format("15:04"); got != "15:39" {
+	cst := time.FixedZone("CST", 8*3600)
+	if got := time.Unix(basic.ResetAt, 0).In(cst).Format("15:04"); got != "15:39" {
 		t.Errorf("基础档重置时间应≈15:39(显示 15:40), got %s", got)
 	}
 	if d := describeQuota(wins); d == "" || !strings.Contains(d, "档2") || !strings.Contains(d, "档1") {

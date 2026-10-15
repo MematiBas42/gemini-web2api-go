@@ -205,7 +205,7 @@ func getAnonSession(proxyURL string) (string, error) {
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		r.Header.Set("User-Agent", webUA)
+		r.Header.Set("User-Agent", currentBrowserUA())
 		resp, err := getTLSClient().Do(r)
 		if err != nil {
 			return nil, nil, nil, err
@@ -460,9 +460,7 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 					// 全部账号的高级配额都在受限期：明确报错而不是匿名服务——
 					// 匿名发登录态模型必然被静默降级，agent 拿到的是「看起来成功」
 					// 的劣化回答。
-					return "", nil, nil, fmt.Errorf(
-						"全部 %d 个账号的高级配额都在受限期（滚动窗口，最迟 %v 后自动恢复）；"+
-							"本次请求已取消，避免拿到静默降级的 Flash-Lite 回答", blockedN, quotaBlockDur)
+					return "", nil, nil, &RateLimitError{Reason: "quota_blocked", ProxyID: -1}
 				}
 				break
 			}
@@ -507,6 +505,10 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 			logf("[conv] 账号 #%d cookie 已死，换下一个建会话：%v", a.ID, msg)
 		}
 		if servedDowngraded {
+			if rtCfg().StrictModel {
+				logf("[quota] %d 个候选账号均被静默降级，strict_model 已开，终止并返回 429", len(tried))
+				return "", nil, nil, &RateLimitError{Reason: "model_downgraded", ProxyID: -1}
+			}
 			// 所有候选号都被降级过：按最后一次的降级结果返回（upstream_model 可见）。
 			// 时机上是正确的降级兜底——明确失败 vs 劣化成功之间，这里选劣化成功，
 			// 因为多轮会话的上下文已经在服务端，客户端重试也改变不了配额现实。

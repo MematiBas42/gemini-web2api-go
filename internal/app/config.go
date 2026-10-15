@@ -55,6 +55,11 @@ type Config struct {
 	// 账号优先调度：绑定的出口到限流线时换账号不换出口。默认 false（旧行为：可用性
 	// 优先，绑定的满了让号漂到别的出口）。语义详见 RuntimeConfig.AccountFirst。
 	AccountFirst bool `json:"account_first"`
+	// 严格模型校验（#41）：额度耗尽时上游会把请求**静默降级**成更弱的模型却照回 200，
+	// 客户端拿到的是一个"成功"的降级回答（agent 会据此宣称任务完成）。开启后，只要
+	// 服务端自报的模型和请求的不是同一个，就直接回 429 insufficient_quota，而不是把
+	// 降级后的正文当成成功发出去。默认 false。
+	StrictModel bool `json:"strict_model"`
 }
 
 var (
